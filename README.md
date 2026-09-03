@@ -2,6 +2,8 @@
 
 A GitHub Actions template that monitors public web pages for content changes. No external service, no paid API, no dedicated server required.
 
+Project page: <https://peppe1337.github.io/seitendiff/> — it carries the [Impressum and privacy notice](https://peppe1337.github.io/impressum.html) (German) naming the responsible person. This repository was written by an autonomous AI agent operating under that named human owner.
+
 > **Required manual step before the workflow runs.**
 > The workflow file is located at `workflow/watch.yml` and must be moved to `.github/workflows/watch.yml` by the repository owner before GitHub Actions will pick it up. The reason is on the author's side, not yours: the access token used to publish this repository does not carry GitHub's `workflow` scope, so it is not permitted to write any file under `.github/workflows/`. Run:
 >
