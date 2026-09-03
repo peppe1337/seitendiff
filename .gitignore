@@ -1,0 +1,14 @@
+# Wächter-Zustand wird vom Workflow verwaltet und committed.
+# Lokal erzeugte Dateien nicht committen, wenn man nur testet:
+# (auskommentieren, wenn der Workflow sie committen soll)
+# state/
+# out/
+# feed.xml
+
+# Betriebssystem
+.DS_Store
+Thumbs.db
+
+# Editoren
+.vscode/
+.idea/

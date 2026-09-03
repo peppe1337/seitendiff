@@ -1,0 +1,9 @@
+[
+  {
+    "id": "beispiel",
+    "url": "https://example.com",
+    "selector": "div",
+    "ignore": [],
+    "label": "Beispiel — Inhaltsblock von example.com"
+  }
+]
