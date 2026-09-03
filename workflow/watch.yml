@@ -57,10 +57,20 @@ jobs:
         run: |
           CHANGED_IDS="${{ steps.watch.outputs.changed_ids }}"
           BODY="Seitendiff-Wächter hat eine Änderung erkannt.\n\nGeänderte Wächter: \`${CHANGED_IDS}\`\n\nSiehe Diff-Dateien im Verzeichnis \`out/\` und den Feed \`feed.xml\`."
+
+          # Label anlegen, falls es fehlt. Ohne diesen Schritt bricht "gh issue create
+          # --label" ab, wenn das Label nicht existiert — dann gäbe es keine Meldung,
+          # obwohl der Zustand im Schritt davor bereits committet wurde. Die Änderung
+          # wäre verbraucht und würde nie gemeldet.
+          gh label create seitendiff --color BFD4F2 --description "Seitendiff-Wächter" 2>/dev/null || true
+
+          # Kein "|| true": Schlägt das Anlegen des Issues fehl, muss der Lauf rot werden.
+          # Ein stiller Fehlschlag hier ist der schlimmste Fall — die Änderung ist
+          # bereits committet und wird deshalb kein zweites Mal erkannt.
           gh issue create \
             --title "Seitenänderung erkannt: ${CHANGED_IDS}" \
             --body "$(printf '%b' "$BODY")" \
-            --label "seitendiff" || true
+            --label "seitendiff"
 
       - name: Zusammenfassung
         if: always()
