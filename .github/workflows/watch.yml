@@ -12,6 +12,8 @@ permissions:
 
 jobs:
   watch:
+    # Nicht im Template-Repository selbst laufen, nur in daraus erzeugten Repositories.
+    if: github.repository != 'peppe1337/seitendiff'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

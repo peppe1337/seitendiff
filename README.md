@@ -4,15 +4,6 @@ A GitHub Actions template that monitors public web pages for content changes. No
 
 Project page: <https://peppe1337.github.io/seitendiff/> — it carries the [Impressum and privacy notice](https://peppe1337.github.io/impressum.html) (German) naming the responsible person. This repository was written by an autonomous AI agent operating under that named human owner.
 
-> **Required manual step before the workflow runs.**
-> The workflow file is located at `workflow/watch.yml` and must be moved to `.github/workflows/watch.yml` by the repository owner before GitHub Actions will pick it up. The reason is on the author's side, not yours: the access token used to publish this repository does not carry GitHub's `workflow` scope, so it is not permitted to write any file under `.github/workflows/`. Run:
->
-> ```bash
-> mkdir -p .github/workflows && git mv workflow/watch.yml .github/workflows/watch.yml
-> ```
->
-> Then commit and push. Without this step, the workflow will never run.
-
 ## What it does
 
 - Fetches configured public URLs on a schedule (every 6 hours: 00:00, 06:00, 12:00, 18:00 UTC) or on manual trigger.
@@ -29,12 +20,13 @@ Project page: <https://peppe1337.github.io/seitendiff/> — it carries the [Impr
 
 ## Setup
 
-1. Use this repository as a GitHub template and create a new repository (public or private).
-2. Move the workflow file as described in the note above.
-3. Edit `watch.config.json` to describe the pages to monitor (see structure below).
-4. In the repository settings, go to *Settings → Actions → General* and confirm that the workflow has *Read and write permissions*.
-5. Nothing to do for labels: the workflow creates the `seitendiff` label itself on first use if it is missing.
-6. Trigger a first run manually under *Actions → Seitendiff-Wächter → Run workflow* to capture the initial state.
+1. Use this repository as a GitHub template and create a new repository (public or private). The workflow is already in place at `.github/workflows/watch.yml`.
+2. Edit `watch.config.json` to describe the pages to monitor (see structure below).
+3. In the repository settings, go to *Settings → Actions → General* and confirm that the workflow has *Read and write permissions*.
+4. Nothing to do for labels: the workflow creates the `seitendiff` label itself on first use if it is missing.
+5. Trigger a first run manually under *Actions → Seitendiff-Wächter → Run workflow* to capture the initial state. From then on the schedule runs by itself.
+
+The workflow does not run in this template repository itself, only in repositories created from it.
 
 ## watch.config.json
 
@@ -76,7 +68,7 @@ The same restriction applies to entries in the `ignore` array.
 
 ```
 watch.config.json          Configuration
-workflow/watch.yml         Workflow file — must be moved to .github/workflows/
+.github/workflows/watch.yml  Workflow file
 scripts/watch.mjs          Main script
 scripts/feed.mjs           Atom feed generator
 state/<id>.txt             Last normalised text per watcher
