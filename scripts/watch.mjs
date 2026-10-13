@@ -7,12 +7,17 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, '..');
+// Ablage für state/, out/ und feed.xml. Standard: Repository-Wurzel neben scripts/.
+// action.yml setzt SEITENDIFF_DATA_DIR, weil der Action-Code nicht im Repository
+// des Aufrufers liegt.
+const ROOT = process.env.SEITENDIFF_DATA_DIR
+  ? resolve(process.env.SEITENDIFF_DATA_DIR)
+  : join(__dirname, '..');
 
 // ─── SelectorError ────────────────────────────────────────────────────────────
 
@@ -356,12 +361,14 @@ async function main() {
   const dryRun = args.includes('--dry-run');
 
   // Konfiguration laden
-  const configPath = join(ROOT, 'watch.config.json');
+  const configPath = process.env.SEITENDIFF_CONFIG
+    ? resolve(process.env.SEITENDIFF_CONFIG)
+    : join(ROOT, 'watch.config.json');
   let watchers;
   try {
     watchers = JSON.parse(readFileSync(configPath, 'utf8'));
   } catch (err) {
-    console.error(`[watch] Fehler beim Lesen von watch.config.json: ${err.message}`);
+    console.error(`[watch] Fehler beim Lesen von ${configPath}: ${err.message}`);
     process.exit(2);
   }
 
@@ -447,8 +454,9 @@ async function main() {
 
     // Zustand schreiben.
     // Der Zeitstempel wird bei JEDEM erfolgreichen Lauf geschrieben, auch ohne Änderung.
-    // Das ist Absicht: dieser Schreibvorgang erzeugt Repo-Aktivität und verhindert,
-    // dass GitHub den Cron-Job nach 60 Tagen ohne Commit deaktiviert.
+    // action.yml committet ihn aber nur zusammen mit einem neuen Ausgangsstand oder
+    // einer inhaltlichen Änderung, damit das Repository nicht bei jedem Lauf einen
+    // Commit bekommt.
     if (!dryRun) {
       writeFileSync(stateTxtPath, newNorm, 'utf8');
       writeFileSync(stateJsonPath, JSON.stringify({

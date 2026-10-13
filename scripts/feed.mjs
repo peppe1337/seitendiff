@@ -9,21 +9,28 @@
  */
 
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
-import { join, dirname, basename } from 'node:path';
+import { join, dirname, basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, '..');
+// Ablage für state/, out/ und feed.xml. Standard: Repository-Wurzel neben scripts/.
+// action.yml setzt SEITENDIFF_DATA_DIR, weil der Action-Code nicht im Repository
+// des Aufrufers liegt.
+const ROOT = process.env.SEITENDIFF_DATA_DIR
+  ? resolve(process.env.SEITENDIFF_DATA_DIR)
+  : join(__dirname, '..');
 
 // ─── Konfiguration laden ──────────────────────────────────────────────────────
 
-const configPath = join(ROOT, 'watch.config.json');
+const configPath = process.env.SEITENDIFF_CONFIG
+  ? resolve(process.env.SEITENDIFF_CONFIG)
+  : join(ROOT, 'watch.config.json');
 let watchers;
 try {
   watchers = JSON.parse(readFileSync(configPath, 'utf8'));
 } catch (err) {
-  console.error(`[feed] Fehler beim Lesen von watch.config.json: ${err.message}`);
+  console.error(`[feed] Fehler beim Lesen von ${configPath}: ${err.message}`);
   process.exit(2);
 }
 

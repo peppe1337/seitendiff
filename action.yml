@@ -1,0 +1,178 @@
+name: 'Seitendiff page watcher'
+description: 'Watch a CSS-selected part of a public web page, commit its state to your repository, and open an issue when it changes.'
+author: 'peppe1337'
+branding:
+  icon: 'eye'
+  color: 'blue'
+
+inputs:
+  config:
+    description: 'Path to the JSON file that lists the pages to watch, relative to the repository root.'
+    required: false
+    default: 'watch.config.json'
+  token:
+    description: 'Token used to create the label and open issues. Needs issues: write. Pushing the state uses the credentials that actions/checkout left behind.'
+    required: false
+    default: ${{ github.token }}
+  data-dir:
+    description: 'Folder, relative to the repository root, that holds state/, out/ and feed.xml. Set it when your repository already uses state/ or out/ for something else.'
+    required: false
+    default: '.'
+
+outputs:
+  has_changes:
+    description: "'true' when at least one watched fragment changed in this run, otherwise 'false'."
+    value: ${{ steps.watch.outputs.has_changes }}
+  changed_ids:
+    description: 'Comma-separated ids of the watchers whose fragment changed.'
+    value: ${{ steps.watch.outputs.changed_ids }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check pages
+      id: watch
+      shell: bash
+      env:
+        SEITENDIFF_CONFIG: ${{ inputs.config }}
+        SEITENDIFF_DATA_DIR: ${{ inputs.data-dir }}
+      run: |
+        major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
+        if [ "$major" -lt 18 ]; then
+          echo "::error::seitendiff needs Node.js 18 or newer on the runner. Found: $(node --version 2>/dev/null || echo none)."
+          exit 1
+        fi
+
+        # watch.mjs exits 0 when all pages were checked, 1 when a page could not be
+        # fetched or matched (the others are still checked), and 2 when the config
+        # cannot be read. Its outputs go to a temporary file first, so a crash before
+        # the end can be told apart from a fetch error.
+        results=$(mktemp "${RUNNER_TEMP:-/tmp}/seitendiff.XXXXXX")
+        code=0
+        GITHUB_OUTPUT="$results" node "$GITHUB_ACTION_PATH/scripts/watch.mjs" || code=$?
+        cat "$results" >> "$GITHUB_OUTPUT"
+
+        case "$code" in
+          0)
+            echo "fetch_errors=false" >> "$GITHUB_OUTPUT"
+            ;;
+          1)
+            if ! grep -q '^has_changes=' "$results"; then
+              echo "::error::The watch script stopped before it finished. See the log above."
+              exit 1
+            fi
+            echo "fetch_errors=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::At least one page could not be fetched, or its selector did not match. No alert was raised for it. Details are in the log above."
+            ;;
+          2)
+            echo "::error::Could not read the config file '$SEITENDIFF_CONFIG'."
+            exit 1
+            ;;
+          *)
+            echo "::error::The watch script exited with code $code."
+            exit 1
+            ;;
+        esac
+
+    - name: Update feed
+      if: steps.watch.outputs.has_changes == 'true'
+      shell: bash
+      env:
+        SEITENDIFF_CONFIG: ${{ inputs.config }}
+        SEITENDIFF_DATA_DIR: ${{ inputs.data-dir }}
+        CHANGED_IDS: ${{ steps.watch.outputs.changed_ids }}
+      run: node "$GITHUB_ACTION_PATH/scripts/feed.mjs" --ids="$CHANGED_IDS"
+
+    - name: Commit state
+      id: commit
+      shell: bash
+      env:
+        DATA_DIR: ${{ inputs.data-dir }}
+        CHANGED_IDS: ${{ steps.watch.outputs.changed_ids }}
+      run: |
+        cd "$DATA_DIR"
+        paths=()
+        for p in state out feed.xml; do
+          if [ -e "$p" ]; then paths+=("$p"); fi
+        done
+        if [ ${#paths[@]} -eq 0 ]; then
+          echo "No state was written in this run."
+          exit 0
+        fi
+
+        if ! git add -A -- "${paths[@]}"; then
+          echo "::error::git refused to add ${paths[*]} in '$DATA_DIR'. If they are listed in .gitignore, point the data-dir input at a folder of their own."
+          exit 1
+        fi
+
+        # The timestamps in state/*.json change on every run. Commit only when there is
+        # more than that: a first baseline, a changed fragment, a diff or a feed entry.
+        # Without the baseline commit the next run would start from scratch again and
+        # could never detect a change.
+        if [ -z "$(git diff --cached --name-only -- "${paths[@]}" ':(exclude)state/*.json')" ]; then
+          git reset -q -- "${paths[@]}"
+          echo "Nothing new to commit."
+          exit 0
+        fi
+
+        if [ -n "$CHANGED_IDS" ]; then
+          message="seitendiff: change detected in ${CHANGED_IDS}"
+        else
+          message="seitendiff: record baseline"
+        fi
+        git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "$message"
+        git push -q
+        echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+    - name: Open issue
+      if: steps.watch.outputs.has_changes == 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        GH_REPO: ${{ github.repository }}
+        REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        CHANGED_IDS: ${{ steps.watch.outputs.changed_ids }}
+        COMMIT_SHA: ${{ steps.commit.outputs.sha }}
+        DATA_DIR: ${{ inputs.data-dir }}
+      run: |
+        # Create the label if it is missing. Otherwise "gh issue create --label" fails.
+        gh label create seitendiff --color BFD4F2 --description "Change detected by seitendiff" >/dev/null 2>&1 || true
+
+        prefix="${DATA_DIR#./}"
+        prefix="${prefix%/}"
+        if [ -z "$prefix" ] || [ "$prefix" = "." ]; then prefix=""; else prefix="$prefix/"; fi
+        ref="${COMMIT_SHA:-HEAD}"
+
+        body="seitendiff detected a change in the watched part of these pages:"$'\n\n'
+        IFS=',' read -ra ids <<< "$CHANGED_IDS"
+        for id in "${ids[@]}"; do
+          body+="- \`$id\`: [diff](${REPO_URL}/blob/${ref}/${prefix}out/${id}.diff)"$'\n'
+        done
+        body+=$'\n'"Every change is also recorded in [${prefix}feed.xml](${REPO_URL}/blob/${ref}/${prefix}feed.xml)."
+
+        # No "|| true" here. The new state is already committed, so if the issue
+        # cannot be opened, the run has to fail visibly or the change is lost.
+        gh issue create --title "Page changed: ${CHANGED_IDS}" --body "$body" --label seitendiff
+
+    - name: Summary
+      if: always()
+      shell: bash
+      env:
+        HAS_CHANGES: ${{ steps.watch.outputs.has_changes }}
+        CHANGED_IDS: ${{ steps.watch.outputs.changed_ids }}
+        FETCH_ERRORS: ${{ steps.watch.outputs.fetch_errors }}
+      run: |
+        {
+          echo "### seitendiff"
+          case "$HAS_CHANGES" in
+            true)  echo "Changes detected: \`$CHANGED_IDS\`" ;;
+            false) echo "No changes detected." ;;
+            *)     echo "The check did not finish. See the log." ;;
+          esac
+          if [ "$FETCH_ERRORS" = "true" ]; then
+            echo ""
+            echo ":warning: At least one page could not be fetched or matched. No alert was raised for it."
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
