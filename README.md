@@ -1,14 +1,23 @@
 # Seitendiff Watcher
 
-A GitHub Actions template that monitors public web pages for content changes. No external service, no paid API, no dedicated server required.
+Watches one part of a public web page from GitHub Actions and opens an issue in your repository when that part changes.
 
-[Impressum and privacy notice](https://peppe1337.github.io/impressum.html) (German), naming the responsible person. This repository was written by an autonomous AI agent operating under that named human owner.
+**Use it when**
 
-## Usage
+- you care about one block of a page, such as a price, a notice, a changelog or a job list, and not the rest of the page
+- you watch a handful of pages, and a check every few hours is soon enough
+- you want no external service, no API key and no server, only a repository you own
 
-### As an action in any repository
+**Don't use it when**
 
-Add a `watch.config.json` (see below) and this workflow, for example as `.github/workflows/seitendiff.yml`. The action itself is the last two lines.
+- the content is rendered by JavaScript. Seitendiff reads the raw HTML response and runs no scripts.
+- you want to watch hundreds of pages. Pages are fetched one after another in a single job.
+- you need alerts within minutes. GitHub starts scheduled runs late, often by several minutes.
+- the page needs a login or shows a CAPTCHA, or you need selectors beyond the [five simple forms](#supported-selector-forms)
+
+## Quick start: as an action
+
+Add a [`watch.config.json`](#watchconfigjson) to any repository, plus this workflow, for example as `.github/workflows/seitendiff.yml`. The action itself is the last two lines.
 
 ```yaml
 on:
@@ -26,42 +35,21 @@ jobs:
       - uses: peppe1337/seitendiff@v1
 ```
 
-The action commits its state to the repository it runs in, so `actions/checkout` has to come first. If your repository already uses or ignores `state/` or `out/`, set `data-dir` to a folder of its own.
+The first run records the watched part of each page and commits it. Each later run that finds a difference commits the new state and opens an issue labelled `seitendiff`. GitHub notifies everyone watching the repository, by email if they have that turned on.
 
-| Input      | Default               | Description |
-|------------|-----------------------|-------------|
-| `config`   | `watch.config.json`   | Path to the config file, relative to the repository root |
-| `token`    | `${{ github.token }}` | Token used to create the label and open issues; needs `issues: write` |
-| `data-dir` | `.`                   | Folder for `state/`, `out/` and `feed.xml`, relative to the repository root |
+## Setup: as a template
 
-Outputs: `has_changes` (`'true'` or `'false'`) and `changed_ids` (comma-separated ids).
+If you would rather have everything in one place, create a repository from this one:
 
-### As a template
-
-1. Use this repository as a GitHub template and create a new repository (public or private). The workflow is already in place at `.github/workflows/watch.yml` and calls the action from the same repository.
-2. Edit `watch.config.json` to describe the pages to monitor (see structure below).
-3. Trigger a first run under *Actions → Seitendiff watcher → Run workflow*. It records the initial state. From then on the schedule runs by itself.
+1. Click **Use this template** at the top of this page and create a new repository, public or private. The workflow is already in place at `.github/workflows/watch.yml` and calls the action from the same repository.
+2. Edit `watch.config.json` to list the pages you want to watch.
+3. Start a first run under *Actions → Seitendiff watcher → Run workflow*. It records the initial state. From then on the schedule runs by itself, every 6 hours.
 
 The workflow requests `contents: write` and `issues: write` itself. If your organisation restricts the workflow token, allow read and write access under *Settings → Actions → General*. The workflow does not run in this template repository itself, only in repositories created from it.
 
-## What it does
+## Configuration
 
-- Fetches configured public URLs on a schedule (the template uses every 6 hours: 00:00, 06:00, 12:00, 18:00 UTC) or on manual trigger.
-- Extracts the fragment of the page identified by a CSS selector (see supported forms below).
-- Removes sub-elements listed in `ignore` before comparison.
-- Normalises the result (strips HTML comments, collapses whitespace) and compares it against the previously stored state.
-- On the first run for a page: commits that state as the baseline. Nothing is reported.
-- On change:
-  - Appends a new entry to the Atom feed `feed.xml` (includes a line-based diff).
-  - Opens a GitHub Issue labelled `seitendiff`, with a link to the diff. The label is created on first use. GitHub sends the notification email to repository watchers.
-  - Commits the new state, diff, and feed back to the repository.
-- When nothing changed, nothing is committed. Only the check timestamps would differ, and those are not worth a commit.
-- On network or HTTP error: no alert is raised; the error is logged as a warning and the run continues with the remaining watchers.
-- If the config file cannot be read, the run fails.
-- If opening the Issue fails, the workflow run fails visibly rather than passing silently. This matters: the new state is committed before the Issue is opened, so a swallowed error would consume the change without ever reporting it.
-- On an unsupported selector form: the watcher for that entry is skipped with a `SelectorError` logged; no alert is raised.
-
-## watch.config.json
+### watch.config.json
 
 ```json
 [
@@ -77,15 +65,15 @@ The workflow requests `contents: write` and `issues: write` itself. If your orga
 
 | Field      | Required | Description |
 |------------|----------|-------------|
-| `id`       | yes      | Unique identifier; used as a filename component — no spaces or special characters |
+| `id`       | yes      | Unique identifier. Used in file names and in the issue title, so no spaces or special characters |
 | `url`      | yes      | Public URL to fetch |
-| `selector` | no       | CSS selector identifying the element to watch (supported forms only, see below). If empty or omitted, the entire `<body>` is compared |
-| `ignore`   | no       | Array of selectors; matching elements are removed from the extracted fragment before comparison |
-| `label`    | yes      | Human-readable description; appears in the Issue title |
+| `selector` | no       | Selector for the element to watch, in one of the supported forms below. If empty or omitted, the entire `<body>` is compared |
+| `ignore`   | no       | Array of selectors. Matching elements are removed from the watched part before comparison |
+| `label`    | yes      | Human-readable name, used as the title of the feed entry |
 
-## Supported selector forms
+### Supported selector forms
 
-The script does not use an HTML parser. Selectors are matched with regular expressions. Only the following forms are supported (see `SELECTOR_PATTERN` in [scripts/watch.mjs](scripts/watch.mjs)):
+There is no HTML parser. Selectors are matched with regular expressions, and only these forms work (see `SELECTOR_PATTERN` in [scripts/watch.mjs](scripts/watch.mjs)):
 
 - Tag name only: `main`, `article`, `div`
 - Class selector: `.news`, `.price-box`
@@ -93,40 +81,70 @@ The script does not use an HTML parser. Selectors are matched with regular expre
 - Tag with class: `div.news`, `section.hero`
 - Tag with ID: `div#main`, `article#post`
 
-Any selector that does not match this pattern (for example `div > p`, `ul li`, `:first-child`, `[data-x]`) causes a `SelectorError`. When this happens, the watcher for that entry is skipped entirely — the body is **not** used as a fallback. The error is logged to the workflow output.
+Any other selector, for example `div > p`, `ul li`, `:first-child` or `[data-x]`, causes a `SelectorError`. The same happens when a selector matches nothing. That page is then skipped and the error is logged. The whole body is **not** used as a fallback. Entries in `ignore` must use the same forms, but an `ignore` entry that matches nothing is fine.
 
-The same restriction applies to entries in the `ignore` array.
+### Action inputs and outputs
 
-## File structure
+| Input      | Default               | Description |
+|------------|-----------------------|-------------|
+| `config`   | `watch.config.json`   | Path to the config file, relative to the repository root |
+| `token`    | `${{ github.token }}` | Token used to create the label and open issues. Needs `issues: write` |
+| `data-dir` | `.`                   | Folder for `state/`, `out/` and `feed.xml`, relative to the repository root. Set it if your repository already uses or ignores `state/` or `out/` |
+
+| Output        | Description |
+|---------------|-------------|
+| `has_changes` | `'true'` if at least one watched part changed in this run, otherwise `'false'` |
+| `changed_ids` | Comma-separated ids of the pages that changed |
+
+The action commits to the repository it runs in, so `actions/checkout` has to run first and the job needs `contents: write`. It needs Node.js 18 or newer and the GitHub CLI on the runner. GitHub-hosted runners have both.
+
+## How it works
+
+1. Each configured URL is fetched in turn, with a 15-second timeout.
+2. The element matched by `selector` is cut out, elements matched by `ignore` are removed, HTML comments are stripped and whitespace is collapsed.
+3. The result is compared with the stored state in `state/<id>.txt`.
+4. On the first run for a page, that state is committed as the baseline. Nothing is reported.
+5. On a change, a diff goes to `out/<id>.diff` and an entry to the Atom feed `feed.xml`. State, diff and feed are committed and pushed. Then an issue labelled `seitendiff` is opened with a link to the diff. The label is created on first use.
+6. When nothing changed, nothing is committed. Only the check timestamps in `state/<id>.json` would differ, and they are not worth a commit.
+7. A network error, an HTTP error or a selector problem raises no alert. It is logged as a warning, the remaining pages are still checked, and the run stays green.
+8. If the config file cannot be read, the run fails.
+9. If the issue cannot be opened, the run fails visibly. This matters: the new state is already committed at that point, so a swallowed error would use up the change without ever reporting it.
+
+Files in the repository:
 
 ```
-action.yml                   Action definition (used by both usage modes)
+action.yml                   Action definition, used by both setups
 watch.config.json            Configuration
 .github/workflows/watch.yml  Template workflow, calls action.yml
-scripts/watch.mjs            Main script
+scripts/watch.mjs            Fetch, extract, compare
 scripts/feed.mjs             Atom feed generator
-state/<id>.txt               Last normalised text per watcher
+state/<id>.txt               Last normalised text per page
 state/<id>.json              SHA-256, timestamp, HTTP status
-out/<id>.diff                Last diff per watcher (max. 80 lines)
-feed.xml                     Atom feed (max. 50 entries)
+out/<id>.diff                Last diff per page
+feed.xml                     Atom feed, at most 50 entries
 test/                        Offline tests
 ```
 
-## Running tests locally
+## Limitations
+
+- **Selector subset only.** Descendant combinators, pseudo-classes, attribute selectors and multi-class selectors are not supported. A page configured with one of them is skipped.
+- **No JavaScript rendering.** Pages are fetched with `fetch()`. Only the initial HTML response is compared, so single-page applications and client-side rendered content are out of reach.
+- **Coarse diffs.** Normalisation collapses the watched part into a single line. The diff therefore shows the whole old text and the whole new text, not just the changed words.
+- **Approximate schedule.** GitHub Actions cron schedules do not fire at exact times. Delays of several minutes are common under load.
+- **Inactive repository suspension.** GitHub disables scheduled workflows in public repositories after 60 days without activity. Seitendiff only commits when something changed, so a quiet page can run into this. Re-enable the workflow in the Actions tab.
+- **Runner IP blocks.** Some websites block requests from GitHub-hosted runner IP ranges.
+- **Feed size.** The Atom feed keeps at most 50 entries. Older entries are dropped.
+
+## Running the tests
 
 ```bash
 node test/rot-gruen.mjs
 ```
 
-The tests run without a network connection.
+The tests need no network connection.
 
-## Limitations
+---
 
-- **Selector subset only.** Only the five selector forms listed above are supported. Descendant combinators, pseudo-classes, attribute selectors, and multi-class selectors are not supported and will cause the affected watcher entry to be skipped.
-- **No JavaScript rendering.** The script fetches raw HTML with `fetch()`. Pages that require JavaScript to render their content (single-page applications, client-side hydration) are not supported — only the initial HTML response is compared.
-- **Schedule timing is approximate.** GitHub Actions cron schedules do not fire at exact times; delays of several minutes are common under load.
-- **Inactive repository suspension.** GitHub may disable scheduled workflows in repositories that have had no commits for 60 days. Re-enable them manually in the Actions tab.
-- **Runner IP blocks.** Some websites block requests from GitHub-hosted runner IP ranges.
-- **Diff readability.** The diff algorithm is line-based without LCS (longest common subsequence). Large reformattings produce verbose diffs.
-- **Feed size.** The Atom feed retains at most 50 entries; older entries are discarded.
-- **Pages behind authentication or CAPTCHA** cannot be fetched.
+MIT License, see [LICENSE](LICENSE).
+
+This repository was written by an autonomous AI agent operating under a named human owner. The [Impressum and privacy notice](https://peppe1337.github.io/impressum.html) (German) names the responsible person.
