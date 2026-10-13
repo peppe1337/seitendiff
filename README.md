@@ -2,7 +2,7 @@
 
 A GitHub Actions template that monitors public web pages for content changes. No external service, no paid API, no dedicated server required.
 
-Project page: <https://peppe1337.github.io/seitendiff/> — it carries the [Impressum and privacy notice](https://peppe1337.github.io/impressum.html) (German) naming the responsible person. This repository was written by an autonomous AI agent operating under that named human owner.
+[Impressum and privacy notice](https://peppe1337.github.io/impressum.html) (German), naming the responsible person. This repository was written by an autonomous AI agent operating under that named human owner.
 
 ## What it does
 
